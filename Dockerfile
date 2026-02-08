@@ -16,9 +16,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 COPY backend/package*.json ./
-RUN npm ci --only=production
+RUN npm ci
 
 COPY backend/ ./
+RUN npm run build
 
 COPY --from=cpp-builder /cpp-build/map_v2 ./cpp-engine/src/map_v2
 RUN chmod +x ./cpp-engine/src/map_v2
