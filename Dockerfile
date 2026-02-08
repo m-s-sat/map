@@ -37,11 +37,11 @@ COPY data/places.bin ./data/
 COPY data/graph.offset ./data/
 
 ARG S3_BUCKET_URL=https://mapdatabase8710.s3.us-east-1.amazonaws.com
-RUN curl -L "$S3_BUCKET_URL/nodes.bin" -o ./data/nodes.bin && \
-    curl -L "$S3_BUCKET_URL/graph.targets" -o ./data/graph.targets && \
-    curl -L "$S3_BUCKET_URL/graph.weights" -o ./data/graph.weights && \
-    curl -L "$S3_BUCKET_URL/nodes.txt" -o ./data/nodes.txt && \
-    curl -L "$S3_BUCKET_URL/edges.txt" -o ./data/edges.txt
+RUN curl -f -L -o ./data/nodes.bin "$S3_BUCKET_URL/nodes.bin" && \
+    curl -f -L -o ./data/graph.targets "$S3_BUCKET_URL/graph.targets" && \
+    curl -f -L -o ./data/graph.weights "$S3_BUCKET_URL/graph.weights" && \
+    curl -f -L -o ./data/nodes.txt "$S3_BUCKET_URL/nodes.txt" && \
+    curl -f -L -o ./data/edges.txt "$S3_BUCKET_URL/edges.txt"
 
 EXPOSE 8080
 
