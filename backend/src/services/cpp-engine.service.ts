@@ -5,14 +5,21 @@ class CppEngineService {
     private process: ChildProcessWithoutNullStreams | null = null;
     private queue: { resolve: (value: any) => void; reject: (reason: any) => void }[] = [];
     private isReady: boolean = false;
-
     private buffer: string = "";
+    private restartAttempts: number = 0;
+    private maxRestarts: number = 3;
+    private disabled: boolean = false;
 
     constructor() {
         this.startProcess();
     }
 
     private startProcess() {
+        if (this.disabled) {
+            console.log("C++ engine is disabled due to repeated failures");
+            return;
+        }
+
         const fs = require('fs');
         const isProduction = process.env.NODE_ENV === 'production';
 
@@ -34,9 +41,16 @@ class CppEngineService {
             : path.join(__dirname, "../../../data") + path.sep;
 
         console.log("Spawning C++ engine:", cppPath, "with data from", dataDir);
-        this.process = spawn(cppPath, [dataDir], {
-            stdio: ['pipe', 'pipe', 'pipe']
-        });
+
+        try {
+            this.process = spawn(cppPath, [dataDir], {
+                stdio: ['pipe', 'pipe', 'pipe']
+            });
+        } catch (e) {
+            console.error("Failed to spawn C++ engine:", e);
+            this.disabled = true;
+            return;
+        }
 
         this.process.stdout.on("data", (data) => {
             this.buffer += data.toString();
@@ -51,8 +65,8 @@ class CppEngineService {
                         const parts = line.trim().split(" ");
                         if (parts.length > 0) {
                             const distance = parseFloat(parts[0]);
-                            const path = parts.slice(1).map(Number);
-                            request.resolve({ distance, path });
+                            const nodePath = parts.slice(1).map(Number);
+                            request.resolve({ distance, path: nodePath });
                         } else {
                             request.resolve(null);
                         }
@@ -68,7 +82,12 @@ class CppEngineService {
             console.log("[CPP-LOG]:", msg);
             if (msg.includes("Ready for queries")) {
                 this.isReady = true;
+                this.restartAttempts = 0;
             }
+        });
+
+        this.process.on("error", (err) => {
+            console.error("C++ process error:", err);
         });
 
         this.process.on("close", (code) => {
@@ -81,18 +100,30 @@ class CppEngineService {
                 if (req) req.resolve(null);
             }
 
-            console.log("Restarting C++ engine in 2 seconds...");
-            setTimeout(() => this.startProcess(), 2000);
+            this.restartAttempts++;
+            if (this.restartAttempts >= this.maxRestarts) {
+                console.log(`C++ engine disabled after ${this.maxRestarts} failed restart attempts. Routing unavailable.`);
+                this.disabled = true;
+            } else {
+                console.log(`Restarting C++ engine (attempt ${this.restartAttempts}/${this.maxRestarts})...`);
+                setTimeout(() => this.startProcess(), 3000);
+            }
         });
     }
 
     public async query(source: number, destination: number): Promise<{ distance: number, path: number[] } | null> {
+        if (this.disabled) {
+            return null;
+        }
+
         if (!this.process) {
             this.startProcess();
+            if (this.disabled) return null;
         }
-        if (!this.isReady) {
-            await new Promise(resolve => setTimeout(resolve, 1000));
 
+        if (!this.isReady) {
+            await new Promise(resolve => setTimeout(resolve, 2000));
+            if (!this.isReady) return null;
         }
 
         return new Promise((resolve, reject) => {
@@ -100,7 +131,7 @@ class CppEngineService {
             if (this.process?.stdin) {
                 this.process.stdin.write(`${source} ${destination}\n`);
             } else {
-                reject("Process not started");
+                resolve(null);
             }
         });
     }
