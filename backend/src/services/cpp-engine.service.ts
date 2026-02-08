@@ -13,8 +13,18 @@ class CppEngineService {
     }
 
     private startProcess() {
-        const cppPath = path.join(__dirname, "../../../cpp-engine/src/map_v2.exe");
-        const dataDir = path.join(__dirname, "../../../data") + path.sep;
+        const isProduction = process.env.NODE_ENV === 'production';
+
+        let cppPath: string;
+        let dataDir: string;
+
+        if (isProduction) {
+            cppPath = path.join(process.cwd(), 'cpp-engine/src/map_v2');
+            dataDir = path.join(process.cwd(), 'data') + path.sep;
+        } else {
+            cppPath = path.join(__dirname, "../../../cpp-engine/src/map_v2.exe");
+            dataDir = path.join(__dirname, "../../../data") + path.sep;
+        }
 
         console.log("Spawning C++ engine:", cppPath, "with data from", dataDir);
         this.process = spawn(cppPath, [dataDir]);
