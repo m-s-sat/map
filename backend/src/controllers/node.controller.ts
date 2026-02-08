@@ -2,15 +2,11 @@ import { Request, Response } from "express";
 import fs from "fs";
 import path from "path";
 
-interface NodeData {
-    id: number;
-    lat: number;
-    lon: number;
-}
-
-let nodesCache: NodeData[] = [];
+let nodesBuffer: Buffer | null = null;
+let nodeCount = 0;
 let isLoaded = false;
-let loadProgress = 0;
+let dataBounds = { minLat: 0, maxLat: 0, minLon: 0, maxLon: 0 };
+let dataCenter = { lat: 0, lon: 0 };
 
 const isProduction = process.env.NODE_ENV === 'production';
 const nodesBinFile = isProduction
@@ -31,58 +27,59 @@ function loadNodesBinary(): void {
 
     const buffer = fs.readFileSync(nodesBinFile);
     if (buffer.length % 16 !== 0) {
-        console.error(`[NODES] Invalid binary file size: ${buffer.length} bytes. Expected multiple of 16.`);
-        console.error(`[NODES] Please check if the file was downloaded correctly (e.g. S3 URL issues).`);
-        isLoaded = true; // Prevent retry loop crashing
+        console.error(`[NODES] Invalid binary file size: ${buffer.length} bytes.`);
+        isLoaded = true;
         return;
     }
-    const nodeCount = buffer.length / 16;
 
-    console.log(`Binary file has ${nodeCount.toLocaleString()} nodes (${(buffer.length / 1024 / 1024).toFixed(2)} MB)`);
+    nodesBuffer = buffer;
+    nodeCount = buffer.length / 16;
 
-    const nodes: NodeData[] = new Array(nodeCount);
+    let minLat = Infinity, maxLat = -Infinity;
+    let minLon = Infinity, maxLon = -Infinity;
 
-    for (let i = 0; i < nodeCount; i++) {
+    const sampleSize = Math.min(nodeCount, 100000);
+    const step = Math.max(1, Math.floor(nodeCount / sampleSize));
+
+    for (let i = 0; i < nodeCount; i += step) {
         const offset = i * 16;
-        nodes[i] = {
-            id: i,
-            lat: buffer.readDoubleLE(offset),
-            lon: buffer.readDoubleLE(offset + 8),
-        };
-
-        if (i % 1000000 === 0 && i > 0) {
-            loadProgress = i;
-            console.log(`Loaded ${i.toLocaleString()} nodes...`);
-        }
+        const lat = buffer.readDoubleLE(offset);
+        const lon = buffer.readDoubleLE(offset + 8);
+        if (lat < minLat) minLat = lat;
+        if (lat > maxLat) maxLat = lat;
+        if (lon < minLon) minLon = lon;
+        if (lon > maxLon) maxLon = lon;
     }
 
-    nodesCache = nodes;
+    dataBounds = { minLat, maxLat, minLon, maxLon };
+    dataCenter = { lat: (minLat + maxLat) / 2, lon: (minLon + maxLon) / 2 };
+
+    console.log(`Binary file has ${nodeCount.toLocaleString()} nodes`);
+    console.log(`Data bounds: lat [${minLat.toFixed(4)}, ${maxLat.toFixed(4)}], lon [${minLon.toFixed(4)}, ${maxLon.toFixed(4)}]`);
     isLoaded = true;
 
     const elapsed = (Date.now() - startTime) / 1000;
-    console.log(`Finished loading ${nodeCount.toLocaleString()} nodes in ${elapsed.toFixed(2)}s`);
+    console.log(`Finished loading nodes in ${elapsed.toFixed(2)}s`);
 }
 
 setTimeout(() => loadNodesBinary(), 100);
 
 export const getNodes = async (req: Request, res: Response) => {
     try {
-        if (!isLoaded) {
+        if (!isLoaded || !nodesBuffer) {
             return res.json({
                 nodes: [],
                 total: 0,
-                loading: true,
-                progress: loadProgress
+                loading: true
             });
         }
 
         const { minLat, maxLat, minLon, maxLon, limit } = req.query;
 
         if (!minLat || !maxLat || !minLon || !maxLon) {
-            const sampleNodes = nodesCache.slice(0, Math.min(500, nodesCache.length));
             return res.json({
-                nodes: sampleNodes,
-                total: nodesCache.length,
+                nodes: [],
+                total: nodeCount,
                 sampled: true
             });
         }
@@ -95,65 +92,44 @@ export const getNodes = async (req: Request, res: Response) => {
         };
 
         const maxNodes = limit ? parseInt(limit as string, 10) : 2000;
+        const result = [];
 
-        const filtered: NodeData[] = [];
-        for (const node of nodesCache) {
-            if (
-                node.lat >= bounds.minLat &&
-                node.lat <= bounds.maxLat &&
-                node.lon >= bounds.minLon &&
-                node.lon <= bounds.maxLon
-            ) {
-                filtered.push(node);
-                if (filtered.length >= maxNodes) break;
+        for (let i = 0; i < nodeCount; i++) {
+            const offset = i * 16;
+            const lat = nodesBuffer.readDoubleLE(offset);
+            const lon = nodesBuffer.readDoubleLE(offset + 8);
+
+            if (lat >= bounds.minLat && lat <= bounds.maxLat &&
+                lon >= bounds.minLon && lon <= bounds.maxLon) {
+
+                result.push({ id: i, lat, lon });
+
+                if (result.length >= maxNodes) break;
             }
         }
 
         res.json({
-            nodes: filtered,
-            total: nodesCache.length,
-            inBounds: filtered.length,
-            bounds
+            nodes: result,
+            total: nodeCount
         });
-    } catch (err) {
-        console.error("Error loading nodes:", err);
-        res.status(500).json({ error: "Failed to load nodes" });
+    } catch (error) {
+        console.error("Error fetching nodes:", error);
+        res.status(500).json({ error: "Internal server error" });
     }
 };
 
 export const getNodeStats = async (req: Request, res: Response) => {
-    try {
-        if (!isLoaded) {
-            return res.json({
-                count: 0,
-                loading: true,
-                progress: loadProgress
-            });
-        }
-
-        if (nodesCache.length === 0) {
-            return res.json({ count: 0 });
-        }
-
-        let minLat = Infinity, maxLat = -Infinity;
-        let minLon = Infinity, maxLon = -Infinity;
-
-        for (const node of nodesCache) {
-            if (node.lat < minLat) minLat = node.lat;
-            if (node.lat > maxLat) maxLat = node.lat;
-            if (node.lon < minLon) minLon = node.lon;
-            if (node.lon > maxLon) maxLon = node.lon;
-        }
-
-        res.json({
-            count: nodesCache.length,
-            bounds: { minLat, maxLat, minLon, maxLon },
-            center: {
-                lat: (minLat + maxLat) / 2,
-                lon: (minLon + maxLon) / 2,
-            }
+    if (!isLoaded || !nodesBuffer) {
+        return res.json({
+            loading: true,
+            count: 0
         });
-    } catch (err) {
-        res.status(500).json({ error: "Failed to get node stats" });
     }
+
+    res.json({
+        count: nodeCount,
+        loaded: isLoaded,
+        bounds: dataBounds,
+        center: dataCenter
+    });
 };

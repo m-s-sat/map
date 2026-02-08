@@ -13,7 +13,6 @@ interface Place {
 
 let placesIndex: Place[] = [];
 let placesLoaded = false;
-let loadProgress = 0;
 
 const isProduction = process.env.NODE_ENV === 'production';
 const binFile = isProduction
@@ -26,30 +25,24 @@ const nodesBinFile = isProduction
 async function loadPlacesFromBinary(): Promise<void> {
     if (placesLoaded) return;
 
-    console.log("[PLACES] Loading places from binary file...");
-    const startTime = Date.now();
-
     if (!fs.existsSync(binFile)) {
-        console.error("[PLACES] Binary file not found:", binFile);
-        console.error("[PLACES] Run: python scripts/convert_places_to_bin.py");
         placesLoaded = true;
         return;
     }
 
     const buffer = fs.readFileSync(binFile);
-    const placeCount = buffer.readUInt32LE(0);
-
-    // Safety check for file size vs count
-    const minExpectedSize = 4 + (placeCount * 97); // Header + records (approx)
-    if (buffer.length < minExpectedSize) {
-        console.error(`[PLACES] Binary file too small. Expected at least ${minExpectedSize} bytes, got ${buffer.length}.`);
-        console.error(`[PLACES] File likely corrupt or download failed.`);
+    if (buffer.length < 4) {
         placesLoaded = true;
         return;
     }
-    console.log(`[PLACES] Reading ${placeCount.toLocaleString()} places...`);
+    const placeCount = buffer.readUInt32LE(0);
 
-    const RECORD_SIZE = 97;
+    const minExpectedSize = 4 + (placeCount * 97);
+    if (buffer.length < minExpectedSize) {
+        placesLoaded = true;
+        return;
+    }
+
     let offset = 4;
 
     for (let i = 0; i < placeCount; i++) {
@@ -78,100 +71,103 @@ async function loadPlacesFromBinary(): Promise<void> {
             lon,
             nodeId: -1,
         });
-
-        if ((i + 1) % 10000 === 0) {
-            loadProgress = i + 1;
-        }
     }
 
     if (fs.existsSync(nodesBinFile)) {
-        console.log("[PLACES] Mapping places to nearest nodes...");
         const nodesBuffer = fs.readFileSync(nodesBinFile);
         const nodeCount = nodesBuffer.length / 16;
 
-        for (const place of placesIndex) {
-            let minDist = Infinity;
-            let nearestNode = 0;
+        const GRID_SIZE = 0.01;
+        const grid = new Map<string, number[]>();
 
-            const searchStart = Math.max(0, Math.floor(place.lat * 100000) - 1000);
-            const searchEnd = Math.min(nodeCount, searchStart + 20000);
+        const getGridKey = (lat: number, lon: number): string => {
+            const latIdx = Math.floor(lat / GRID_SIZE);
+            const lonIdx = Math.floor(lon / GRID_SIZE);
+            return `${latIdx},${lonIdx}`;
+        };
 
-            for (let i = searchStart; i < searchEnd; i++) {
-                const nodeOffset = i * 16;
-                const nodeLat = nodesBuffer.readDoubleLE(nodeOffset);
-                const nodeLon = nodesBuffer.readDoubleLE(nodeOffset + 8);
+        const addToGrid = (key: string, placeIdx: number) => {
+            if (!grid.has(key)) grid.set(key, []);
+            grid.get(key)!.push(placeIdx);
+        };
 
-                const dist = Math.abs(nodeLat - place.lat) + Math.abs(nodeLon - place.lon);
-                if (dist < minDist) {
-                    minDist = dist;
-                    nearestNode = i;
+        const placeDistances = new Float64Array(placesIndex.length).fill(Infinity);
+
+        for (let i = 0; i < placesIndex.length; i++) {
+            const p = placesIndex[i];
+            const baseLatIdx = Math.floor(p.lat / GRID_SIZE);
+            const baseLonIdx = Math.floor(p.lon / GRID_SIZE);
+
+            for (let dLat = -1; dLat <= 1; dLat++) {
+                for (let dLon = -1; dLon <= 1; dLon++) {
+                    const key = `${baseLatIdx + dLat},${baseLonIdx + dLon}`;
+                    addToGrid(key, i);
                 }
             }
-            place.nodeId = nearestNode;
+        }
+
+        for (let i = 0; i < nodeCount; i++) {
+            const offset = i * 16;
+            const lat = nodesBuffer.readDoubleLE(offset);
+            const lon = nodesBuffer.readDoubleLE(offset + 8);
+
+            const key = getGridKey(lat, lon);
+            const relevantPlaces = grid.get(key);
+
+            if (relevantPlaces) {
+                for (const placeIdx of relevantPlaces) {
+                    const p = placesIndex[placeIdx];
+                    const d = (p.lat - lat) ** 2 + (p.lon - lon) ** 2;
+
+                    if (d < placeDistances[placeIdx]) {
+                        placeDistances[placeIdx] = d;
+                        p.nodeId = i;
+                    }
+                }
+            }
         }
     }
 
     placesLoaded = true;
-    console.log(`[PLACES] Loaded ${placesIndex.length.toLocaleString()} places in ${((Date.now() - startTime) / 1000).toFixed(2)}s`);
 }
 
-setTimeout(() => loadPlacesFromBinary(), 500);
+setTimeout(() => loadPlacesFromBinary(), 1000);
 
 export const searchPlaces = async (req: Request, res: Response) => {
     try {
-        if (!placesLoaded) {
-            return res.json({ places: [], loading: true, progress: loadProgress });
-        }
+        const { q = "", limit = "20", offset = "0" } = req.query;
+        const query = (typeof q === 'string' ? q : "").toLowerCase();
+        const limitNum = parseInt(limit as string) || 20;
+        const offsetNum = parseInt(offset as string) || 0;
 
-        const queryParam = req.query.q;
-        const query = (typeof queryParam === "string" ? queryParam : "").toLowerCase().trim();
-        const limitParam = req.query.limit;
-        const limit = parseInt(typeof limitParam === "string" ? limitParam : "20") || 20;
-        const offsetParam = req.query.offset;
-        const offset = parseInt(typeof offsetParam === "string" ? offsetParam : "0") || 0;
+        const filtered = query
+            ? placesIndex.filter(p => p.name.toLowerCase().includes(query))
+            : placesIndex;
 
-        let filtered: Place[];
-
-        if (!query || query.length < 2) {
-            filtered = placesIndex;
-        } else {
-            filtered = placesIndex.filter(p => p.name.toLowerCase().includes(query));
-            filtered.sort((a, b) => {
-                const aStarts = a.name.toLowerCase().startsWith(query) ? 0 : 1;
-                const bStarts = b.name.toLowerCase().startsWith(query) ? 0 : 1;
-                return aStarts - bStarts || a.name.localeCompare(b.name);
-            });
-        }
-
-        const paged = filtered.slice(offset, offset + limit);
-        const hasMore = offset + limit < filtered.length;
+        const results = filtered.slice(offsetNum, offsetNum + limitNum);
 
         res.json({
-            places: paged,
+            places: results,
             total: filtered.length,
-            hasMore,
-            offset,
+            hasMore: offsetNum + limitNum < filtered.length
         });
-    } catch (err) {
-        console.error("[PLACES] Search error:", err);
+    } catch (error) {
         res.status(500).json({ error: "Search failed" });
     }
 };
 
 export const getPlaceNode = async (req: Request, res: Response) => {
     try {
-        const placeId = parseInt(req.params.id as string);
-        const place = placesIndex.find(p => p.id === placeId);
+        const { id } = req.params;
+        const placeId = parseInt(id as string);
 
+        const place = placesIndex.find(p => p.id === placeId);
         if (!place) {
             return res.status(404).json({ error: "Place not found" });
         }
 
-        res.json({
-            place,
-            nodeId: place.nodeId,
-        });
-    } catch (err) {
-        res.status(500).json({ error: "Failed to get place" });
+        res.json({ nodeId: place.nodeId });
+    } catch (error) {
+        res.status(500).json({ error: "Internal error" });
     }
 };

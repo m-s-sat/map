@@ -32,6 +32,7 @@ export default function PlaceSearch({ placeholder, onSelect, value }: PlaceSearc
     const containerRef = useRef<HTMLDivElement>(null);
     const listRef = useRef<HTMLDivElement>(null);
     const currentQuery = useRef("");
+    const keyDebounceRef = useRef<NodeJS.Timeout | null>(null);
 
     useEffect(() => {
         if (value !== undefined && value !== query) {
@@ -58,8 +59,7 @@ export default function PlaceSearch({ placeholder, onSelect, value }: PlaceSearc
         }
 
         try {
-            const searchParam = searchQuery.length >= 2 ? searchQuery : "";
-            const res = await fetch(`${API_BASE}/api/places/search?q=${encodeURIComponent(searchParam)}&limit=20&offset=${newOffset}`);
+            const res = await fetch(`${API_BASE}/api/places/search?q=${encodeURIComponent(searchQuery)}&limit=20&offset=${newOffset}`);
 
             if (!res.ok) {
                 setSuggestions([]);
@@ -120,14 +120,35 @@ export default function PlaceSearch({ placeholder, onSelect, value }: PlaceSearc
     const handleKeyDown = (e: React.KeyboardEvent) => {
         if (!isOpen) return;
 
+        const navigate = (direction: 'up' | 'down') => {
+            if (keyDebounceRef.current) return;
+
+            setHighlightIndex((prev) => {
+                const newIndex = direction === 'down'
+                    ? Math.min(prev + 1, suggestions.length - 1)
+                    : Math.max(prev - 1, 0);
+
+                setTimeout(() => {
+                    const item = listRef.current?.querySelector(`[data-index="${newIndex}"]`);
+                    item?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+                }, 0);
+
+                return newIndex;
+            });
+
+            keyDebounceRef.current = setTimeout(() => {
+                keyDebounceRef.current = null;
+            }, 100);
+        };
+
         switch (e.key) {
             case "ArrowDown":
                 e.preventDefault();
-                setHighlightIndex((prev) => Math.min(prev + 1, suggestions.length - 1));
+                navigate('down');
                 break;
             case "ArrowUp":
                 e.preventDefault();
-                setHighlightIndex((prev) => Math.max(prev - 1, 0));
+                navigate('up');
                 break;
             case "Enter":
                 e.preventDefault();
@@ -150,12 +171,8 @@ export default function PlaceSearch({ placeholder, onSelect, value }: PlaceSearc
                 onChange={handleInputChange}
                 onKeyDown={handleKeyDown}
                 onFocus={() => {
-                    if (suggestions.length > 0) {
-                        setIsOpen(true);
-                    } else {
-                        setOffset(0);
-                        searchPlaces(query);
-                    }
+                    setOffset(0);
+                    searchPlaces(query);
                 }}
                 placeholder={placeholder}
                 className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-lg text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
@@ -184,6 +201,7 @@ export default function PlaceSearch({ placeholder, onSelect, value }: PlaceSearc
                         <button
                             key={`${place.id}-${index}`}
                             type="button"
+                            data-index={index}
                             onClick={() => handleSelect(place)}
                             className={`w-full px-3 py-2.5 text-left flex items-center gap-3 transition-colors ${index === highlightIndex ? "bg-blue-50" : "hover:bg-slate-50"
                                 }`}

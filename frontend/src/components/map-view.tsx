@@ -1,12 +1,26 @@
 "use client";
 
 import { useEffect, useState, useCallback, useRef, useMemo } from "react";
-import { MapContainer, TileLayer, Polyline, Rectangle, useMap, useMapEvents } from "react-leaflet";
+import { MapContainer, TileLayer, Polyline, Rectangle, useMap, useMapEvents, Marker } from "react-leaflet";
 import { useSelector, useDispatch } from "react-redux";
 import { RootState, AppDispatch } from "@/redux/store";
 import { setNodes } from "@/redux/slices/map-slice";
 import "leaflet/dist/leaflet.css";
 import L from "leaflet";
+
+const startIcon = new L.DivIcon({
+    className: 'custom-marker',
+    html: `<div style="background: #22c55e; width: 28px; height: 28px; border-radius: 50% 50% 50% 0; transform: rotate(-45deg); border: 3px solid white; box-shadow: 0 2px 8px rgba(0,0,0,0.3); display: flex; align-items: center; justify-content: center;"><div style="transform: rotate(45deg); color: white; font-weight: bold; font-size: 12px;">A</div></div>`,
+    iconSize: [28, 28],
+    iconAnchor: [14, 28],
+});
+
+const endIcon = new L.DivIcon({
+    className: 'custom-marker',
+    html: `<div style="background: #ef4444; width: 28px; height: 28px; border-radius: 50% 50% 50% 0; transform: rotate(-45deg); border: 3px solid white; box-shadow: 0 2px 8px rgba(0,0,0,0.3); display: flex; align-items: center; justify-content: center;"><div style="transform: rotate(45deg); color: white; font-weight: bold; font-size: 12px;">B</div></div>`,
+    iconSize: [28, 28],
+    iconAnchor: [14, 28],
+});
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
 
@@ -163,6 +177,8 @@ function MapController({ stats }: { stats: MapStats | null }) {
                             opacity: 1,
                         }}
                     />
+                    <Marker position={pathCoords[0]} icon={startIcon} />
+                    <Marker position={pathCoords[pathCoords.length - 1]} icon={endIcon} />
                 </>
             )}
 

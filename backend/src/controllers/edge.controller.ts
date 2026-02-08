@@ -2,12 +2,6 @@ import { Request, Response } from "express";
 import fs from "fs";
 import path from "path";
 
-interface NodeData {
-    id: number;
-    lat: number;
-    lon: number;
-}
-
 interface Edge {
     from: number;
     to: number;
@@ -17,8 +11,10 @@ interface Edge {
     toLon: number;
 }
 
-let nodesData: NodeData[] = [];
-let edgesCache: Edge[] = [];
+let nodesBuffer: Buffer | null = null;
+let offsetBuffer: Buffer | null = null;
+let targetsBuffer: Buffer | null = null;
+let nodeCount = 0;
 let isLoaded = false;
 
 const isProduction = process.env.NODE_ENV === 'production';
@@ -35,102 +31,42 @@ const targetsFile = isProduction
 function loadData(): void {
     if (isLoaded) return;
 
-    console.log("[EDGES] Loading binary nodes...");
-    const startTime = Date.now();
-
     if (!fs.existsSync(nodesBinFile)) {
-        console.error("Binary nodes file not found:", nodesBinFile);
         isLoaded = true;
         return;
     }
 
     const nodeBuffer = fs.readFileSync(nodesBinFile);
-
     if (nodeBuffer.length % 16 !== 0) {
-        console.error(`[EDGES] Invalid nodes.bin size: ${nodeBuffer.length} bytes. Expected multiple of 16.`);
-        console.error(`[EDGES] The file appears to be corrupt or is an error message from S3.`);
-        console.error(`[EDGES] Please verify your S3 bucket URL and file permissions.`);
         isLoaded = true;
         return;
     }
 
-    const nodeCount = nodeBuffer.length / 16;
-    console.log(`[EDGES] Loaded ${nodeCount.toLocaleString()} nodes`);
-
-    nodesData = new Array(nodeCount);
-    for (let i = 0; i < nodeCount; i++) {
-        const offset = i * 16;
-        nodesData[i] = {
-            id: i,
-            lat: nodeBuffer.readDoubleLE(offset),
-            lon: nodeBuffer.readDoubleLE(offset + 8),
-        };
-    }
-    console.log(`[EDGES] Loaded ${nodeCount.toLocaleString()} nodes`);
+    nodesBuffer = nodeBuffer;
+    nodeCount = nodeBuffer.length / 16;
 
     if (!fs.existsSync(offsetFile) || !fs.existsSync(targetsFile)) {
-        console.error("CSR files not found - edges will be empty");
         isLoaded = true;
         return;
     }
 
-    console.log("[EDGES] Loading binary CSR edges...");
-    const offsetBuffer = fs.readFileSync(offsetFile);
-    const targetsBuffer = fs.readFileSync(targetsFile);
-
-    const edges: Edge[] = [];
-    const maxEdges = 500000;
-    const sampleRate = Math.max(1, Math.floor(nodeCount / 50000));
-
-    for (let u = 0; u < nodeCount && edges.length < maxEdges; u += sampleRate) {
-        const startOff = offsetBuffer.readUInt32LE(u * 4);
-        const endOff = offsetBuffer.readUInt32LE((u + 1) * 4);
-
-        const fromNode = nodesData[u];
-
-        for (let i = startOff; i < endOff && edges.length < maxEdges; i++) {
-            const v = targetsBuffer.readInt32LE(i * 4);
-
-            if (v < nodeCount && nodesData[v]) {
-                const toNode = nodesData[v];
-                edges.push({
-                    from: u,
-                    to: v,
-                    fromLat: fromNode.lat,
-                    fromLon: fromNode.lon,
-                    toLat: toNode.lat,
-                    toLon: toNode.lon,
-                });
-            }
-        }
-    }
-
-    edgesCache = edges;
+    offsetBuffer = fs.readFileSync(offsetFile);
+    targetsBuffer = fs.readFileSync(targetsFile);
     isLoaded = true;
-    console.log(`[EDGES] Loaded ${edges.length.toLocaleString()} edges from CSR in ${((Date.now() - startTime) / 1000).toFixed(2)}s`);
 }
 
-setTimeout(() => loadData(), 200);
+setTimeout(() => loadData(), 500);
 
 export const getEdges = async (req: Request, res: Response) => {
     try {
-        if (!isLoaded) {
-            return res.json({
-                edges: [],
-                total: 0,
-                loading: true
-            });
+        if (!isLoaded || !nodesBuffer || !offsetBuffer || !targetsBuffer) {
+            return res.json({ edges: [] });
         }
 
-        const { minLat, maxLat, minLon, maxLon, limit } = req.query;
+        const { minLat, maxLat, minLon, maxLon } = req.query;
 
         if (!minLat || !maxLat || !minLon || !maxLon) {
-            const sampleEdges = edgesCache.slice(0, Math.min(1000, edgesCache.length));
-            return res.json({
-                edges: sampleEdges,
-                total: edgesCache.length,
-                sampled: true
-            });
+            return res.json({ edges: [] });
         }
 
         const bounds = {
@@ -140,30 +76,55 @@ export const getEdges = async (req: Request, res: Response) => {
             maxLon: parseFloat(maxLon as string),
         };
 
-        const maxEdges = limit ? parseInt(limit as string, 10) : 5000;
+        const edges: Edge[] = [];
+        const maxEdges = 2000;
 
-        const filtered: Edge[] = [];
-        for (const edge of edgesCache) {
-            const edgeInBounds =
-                (edge.fromLat >= bounds.minLat && edge.fromLat <= bounds.maxLat &&
-                    edge.fromLon >= bounds.minLon && edge.fromLon <= bounds.maxLon) ||
-                (edge.toLat >= bounds.minLat && edge.toLat <= bounds.maxLat &&
-                    edge.toLon >= bounds.minLon && edge.toLon <= bounds.maxLon);
+        const sampleRate = Math.max(1, Math.floor(nodeCount / 50000));
 
-            if (edgeInBounds) {
-                filtered.push(edge);
-                if (filtered.length >= maxEdges) break;
+        for (let u = 0; u < nodeCount; u += sampleRate) {
+            const uOffset = u * 16;
+            const uLat = nodesBuffer.readDoubleLE(uOffset);
+            const uLon = nodesBuffer.readDoubleLE(uOffset + 8);
+
+            if (uLat >= bounds.minLat && uLat <= bounds.maxLat &&
+                uLon >= bounds.minLon && uLon <= bounds.maxLon) {
+
+                const startOff = offsetBuffer.readUInt32LE(u * 4);
+                const endOff = offsetBuffer.readUInt32LE((u + 1) * 4);
+
+                for (let i = startOff; i < endOff; i++) {
+                    const vToken = i * 4;
+                    if (vToken + 4 > targetsBuffer.length) break;
+
+                    const v = targetsBuffer.readInt32LE(vToken);
+
+                    if (v < nodeCount) {
+                        const vOffset = v * 16;
+                        const vLat = nodesBuffer.readDoubleLE(vOffset);
+                        const vLon = nodesBuffer.readDoubleLE(vOffset + 8);
+
+                        edges.push({
+                            from: u,
+                            to: v,
+                            fromLat: uLat,
+                            fromLon: uLon,
+                            toLat: vLat,
+                            toLon: vLon
+                        });
+
+                        if (edges.length >= maxEdges) break;
+                    }
+                }
+                if (edges.length >= maxEdges) break;
             }
         }
 
         res.json({
-            edges: filtered,
-            total: edgesCache.length,
-            inBounds: filtered.length,
-            bounds
+            edges,
+            total: edges.length
         });
-    } catch (err) {
-        console.error("Error loading edges:", err);
-        res.status(500).json({ error: "Failed to load edges" });
+
+    } catch (error) {
+        res.status(500).json({ error: "Internal server error" });
     }
 };
