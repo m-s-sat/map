@@ -1,0 +1,17 @@
+# Ignore node_modules
+**/node_modules
+**/.git
+**/.gitignore
+
+# Ignore source files not needed
+cpp-engine/data/
+cpp-engine/*.o
+*.log
+
+# Frontend (deployed separately)
+frontend/
+
+# Dev files
+.env.local
+*.md
+.vscode/

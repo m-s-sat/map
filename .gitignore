@@ -1,0 +1,44 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build outputs
+dist/
+build/
+.next/
+out/
+
+# Environment files
+.env
+.env.local
+.env.production
+
+# IDE
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# ========================================
+# LARGE DATA FILES (stored externally)
+# ========================================
+data/nodes.bin
+data/nodes.txt
+data/edges.txt
+data/graph.weights
+data/graph.targets
+
+# Source data (too large for GitHub)
+*.osm.pbf
+map_central_zone.csv
+
+# C++ build artifacts
+cpp-engine/*.exe
+cpp-engine/*.o
+cpp-engine/src/*.exe
+
+# Keep these in git (smaller files)
+# data/places.bin (0.5 MB) - OK
+# data/graph.offset (64 MB) - OK
