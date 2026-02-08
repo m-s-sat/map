@@ -1,5 +1,6 @@
 #include "../include/graph.h"
 #include <fstream>
+#define _USE_MATH_DEFINES
 #include <cmath>
 #include <queue>
 #include <algorithm>
@@ -9,20 +10,93 @@
 
 using namespace std;
 
+Graph::~Graph() {
+    unmapFile(nodesMap);
+    unmapFile(offsetsMap);
+    unmapFile(targetsMap);
+    unmapFile(weightsMap);
+}
+
+bool Graph::mapFile(const string& filename, MappedFile& mf) {
+#ifdef _WIN32
+    mf.fileHandle = CreateFileA(filename.c_str(), GENERIC_READ, FILE_SHARE_READ, 
+                                 nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (mf.fileHandle == INVALID_HANDLE_VALUE) {
+        cerr << "Failed to open file: " << filename << endl;
+        return false;
+    }
+    
+    LARGE_INTEGER fileSize;
+    if (!GetFileSizeEx(mf.fileHandle, &fileSize)) {
+        CloseHandle(mf.fileHandle);
+        mf.fileHandle = INVALID_HANDLE_VALUE;
+        return false;
+    }
+    mf.size = static_cast<size_t>(fileSize.QuadPart);
+    
+    mf.mapHandle = CreateFileMapping(mf.fileHandle, nullptr, PAGE_READONLY, 0, 0, nullptr);
+    if (!mf.mapHandle) {
+        CloseHandle(mf.fileHandle);
+        mf.fileHandle = INVALID_HANDLE_VALUE;
+        return false;
+    }
+    
+    mf.data = MapViewOfFile(mf.mapHandle, FILE_MAP_READ, 0, 0, 0);
+    if (!mf.data) {
+        CloseHandle(mf.mapHandle);
+        CloseHandle(mf.fileHandle);
+        mf.mapHandle = nullptr;
+        mf.fileHandle = INVALID_HANDLE_VALUE;
+        return false;
+    }
+#else
+    mf.fd = open(filename.c_str(), O_RDONLY);
+    if (mf.fd < 0) {
+        cerr << "Failed to open file: " << filename << endl;
+        return false;
+    }
+    
+    struct stat sb;
+    if (fstat(mf.fd, &sb) < 0) {
+        close(mf.fd);
+        mf.fd = -1;
+        return false;
+    }
+    mf.size = sb.st_size;
+    
+    mf.data = mmap(nullptr, mf.size, PROT_READ, MAP_PRIVATE, mf.fd, 0);
+    if (mf.data == MAP_FAILED) {
+        close(mf.fd);
+        mf.fd = -1;
+        mf.data = nullptr;
+        return false;
+    }
+#endif
+    return true;
+}
+
+void Graph::unmapFile(MappedFile& mf) {
+    if (!mf.data) return;
+    
+#ifdef _WIN32
+    UnmapViewOfFile(mf.data);
+    if (mf.mapHandle) CloseHandle(mf.mapHandle);
+    if (mf.fileHandle != INVALID_HANDLE_VALUE) CloseHandle(mf.fileHandle);
+    mf.mapHandle = nullptr;
+    mf.fileHandle = INVALID_HANDLE_VALUE;
+#else
+    munmap(mf.data, mf.size);
+    if (mf.fd >= 0) close(mf.fd);
+    mf.fd = -1;
+#endif
+    mf.data = nullptr;
+    mf.size = 0;
+}
+
 void Graph::loadNodes(const string& file){
     ifstream fin(file);
     if(!fin.is_open()) throw runtime_error("Cannot open " + file);
-    
-    string header;
-    getline(fin, header);
-    
-    int id;
-    double lat, lon;
-    
-    while(fin >> id >> lat >> lon){
-        if(id >= nodes.size()) nodes.resize(id + 1);
-        nodes[id] = {lat, lon};
-    }
+    fin.close();
 }
 
 double toRad(double deg){
@@ -42,43 +116,7 @@ double Graph::haversine(double lat1, double lon1, double lat2, double lon2){
 void Graph::loadEdges(const string& file){
     ifstream fin(file);
     if(!fin.is_open()) throw runtime_error("Cannot open " + file);
-    
-    string header;
-    getline(fin, header);
-    
-    vector<int> degrees(nodes.size(), 0);
-    int u, v;
-    while(fin >> u >> v){
-        if(u < nodes.size()) degrees[u]++;
-        if(v < nodes.size()) degrees[v]++;
-    }
-    
-    offsets.resize(nodes.size() + 1);
-    offsets[0] = 0;
-    for(size_t i=0; i<nodes.size(); ++i){
-        offsets[i+1] = offsets[i] + degrees[i];
-    }
-    
-    targets.resize(offsets.back());
-    weights.resize(offsets.back());
-    
-    fin.clear();
-    fin.seekg(0);
-    getline(fin, header);
-    
-    vector<unsigned int> current_offset = offsets;
-    
-    while(fin >> u >> v){
-        double dist = haversine(nodes[u].lat, nodes[u].lon, nodes[v].lat, nodes[v].lon);
-        
-        targets[current_offset[u]] = v;
-        weights[current_offset[u]] = dist;
-        current_offset[u]++;
-        
-        targets[current_offset[v]] = u;
-        weights[current_offset[v]] = dist;
-        current_offset[v]++;
-    }
+    fin.close();
 }
 
 void Graph::loadBinary(const string& prefix){
@@ -87,56 +125,47 @@ void Graph::loadBinary(const string& prefix){
     string targetFile = prefix + "graph.targets";
     string weightFile = prefix + "graph.weights";
     
-    FILE* f = fopen(nodeFile.c_str(), "rb");
-    if(!f) throw runtime_error("Missing " + nodeFile);
-    fseek(f, 0, SEEK_END);
-    long size = ftell(f);
-    rewind(f);
+    cerr << "Memory-mapping " << nodeFile << "..." << endl;
+    if (!mapFile(nodeFile, nodesMap)) {
+        throw runtime_error("Failed to mmap " + nodeFile);
+    }
+    nodes = reinterpret_cast<const Node*>(nodesMap.data);
+    numNodes = nodesMap.size / sizeof(Node);
+    cerr << "Mapped " << numNodes << " nodes (" << nodesMap.size / (1024*1024) << " MB)" << endl;
     
-    int numNodes = size / (sizeof(double) * 2);
-    nodes.resize(numNodes);
+    cerr << "Memory-mapping " << offsetFile << "..." << endl;
+    if (!mapFile(offsetFile, offsetsMap)) {
+        throw runtime_error("Failed to mmap " + offsetFile);
+    }
+    offsets = reinterpret_cast<const unsigned int*>(offsetsMap.data);
+    cerr << "Mapped offsets (" << offsetsMap.size / (1024*1024) << " MB)" << endl;
     
-    fread(nodes.data(), sizeof(Node), numNodes, f);
-    fclose(f);
+    cerr << "Memory-mapping " << targetFile << "..." << endl;
+    if (!mapFile(targetFile, targetsMap)) {
+        throw runtime_error("Failed to mmap " + targetFile);
+    }
+    targets = reinterpret_cast<const int*>(targetsMap.data);
+    numEdges = targetsMap.size / sizeof(int);
+    cerr << "Mapped " << numEdges << " edges (" << targetsMap.size / (1024*1024) << " MB)" << endl;
     
-    f = fopen(offsetFile.c_str(), "rb");
-    if(!f) throw runtime_error("Missing " + offsetFile);
-    fseek(f, 0, SEEK_END);
-    size = ftell(f);
-    rewind(f);
+    cerr << "Memory-mapping " << weightFile << "..." << endl;
+    if (!mapFile(weightFile, weightsMap)) {
+        throw runtime_error("Failed to mmap " + weightFile);
+    }
+    weights = reinterpret_cast<const double*>(weightsMap.data);
+    cerr << "Mapped weights (" << weightsMap.size / (1024*1024) << " MB)" << endl;
     
-    int numOffsets = size / sizeof(unsigned int);
-    offsets.resize(numOffsets);
-    fread(offsets.data(), sizeof(unsigned int), numOffsets, f);
-    fclose(f);
-    
-    f = fopen(targetFile.c_str(), "rb");
-    if(!f) throw runtime_error("Missing " + targetFile);
-    fseek(f, 0, SEEK_END);
-    size = ftell(f);
-    rewind(f);
-    
-    int numEdges = size / sizeof(int);
-    targets.resize(numEdges);
-    fread(targets.data(), sizeof(int), numEdges, f);
-    fclose(f);
-    
-    f = fopen(weightFile.c_str(), "rb");
-    if(!f) throw runtime_error("Missing " + weightFile);
-    fseek(f, 0, SEEK_END);
-    rewind(f);
-    
-    weights.resize(numEdges);
-    fread(weights.data(), sizeof(double), numEdges, f);
-    fclose(f);
+    cerr << "Total virtual memory mapped: " 
+         << (nodesMap.size + offsetsMap.size + targetsMap.size + weightsMap.size) / (1024*1024) 
+         << " MB (actual RAM usage is minimal)" << endl;
 }
 
 pair<double, vector<int>> Graph::dijkstra(int src, int dest){
-    if(src < 0 || src >= nodes.size() || dest < 0 || dest >= nodes.size()) return {0.0, {}};
+    if(src < 0 || (size_t)src >= numNodes || dest < 0 || (size_t)dest >= numNodes) return {0.0, {}};
     
     priority_queue<pair<double, int>, vector<pair<double, int>>, greater<>> pq;
-    vector<double> dist(nodes.size(), 1e18);
-    vector<int> parent(nodes.size(), -1);
+    vector<double> dist(numNodes, 1e18);
+    vector<int> parent(numNodes, -1);
     
     dist[src] = 0;
     pq.push({0, src});
