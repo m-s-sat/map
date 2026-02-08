@@ -12,7 +12,10 @@ let nodesCache: NodeData[] = [];
 let isLoaded = false;
 let loadProgress = 0;
 
-const nodesBinFile = path.join(__dirname, "../../../data/nodes.bin");
+const isProduction = process.env.NODE_ENV === 'production';
+const nodesBinFile = isProduction
+    ? path.join(process.cwd(), 'data/nodes.bin')
+    : path.join(__dirname, "../../../data/nodes.bin");
 
 function loadNodesBinary(): void {
     if (isLoaded) return;

@@ -21,9 +21,16 @@ let nodesData: NodeData[] = [];
 let edgesCache: Edge[] = [];
 let isLoaded = false;
 
-const nodesBinFile = path.join(__dirname, "../../../data/nodes.bin");
-const offsetFile = path.join(__dirname, "../../../data/graph.offset");
-const targetsFile = path.join(__dirname, "../../../data/graph.targets");
+const isProduction = process.env.NODE_ENV === 'production';
+const nodesBinFile = isProduction
+    ? path.join(process.cwd(), 'data/nodes.bin')
+    : path.join(__dirname, "../../../data/nodes.bin");
+const offsetFile = isProduction
+    ? path.join(process.cwd(), 'data/graph.offset')
+    : path.join(__dirname, "../../../data/graph.offset");
+const targetsFile = isProduction
+    ? path.join(process.cwd(), 'data/graph.targets')
+    : path.join(__dirname, "../../../data/graph.targets");
 
 function loadData(): void {
     if (isLoaded) return;

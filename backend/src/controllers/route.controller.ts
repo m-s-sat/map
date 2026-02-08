@@ -14,7 +14,10 @@ let nodesData: NodeData[] | null = null;
 function loadNodes(): NodeData[] {
   if (nodesData) return nodesData;
 
-  const nodesBinFile = path.join(__dirname, "../../../data/nodes.bin");
+  const isProduction = process.env.NODE_ENV === 'production';
+  const nodesBinFile = isProduction
+    ? path.join(process.cwd(), 'data/nodes.bin')
+    : path.join(__dirname, "../../../data/nodes.bin");
 
   if (!fs.existsSync(nodesBinFile)) {
     return [];

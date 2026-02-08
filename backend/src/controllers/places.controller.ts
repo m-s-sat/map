@@ -15,8 +15,13 @@ let placesIndex: Place[] = [];
 let placesLoaded = false;
 let loadProgress = 0;
 
-const binFile = path.join(__dirname, "../../../data/places.bin");
-const nodesBinFile = path.join(__dirname, "../../../data/nodes.bin");
+const isProduction = process.env.NODE_ENV === 'production';
+const binFile = isProduction
+    ? path.join(process.cwd(), 'data/places.bin')
+    : path.join(__dirname, "../../../data/places.bin");
+const nodesBinFile = isProduction
+    ? path.join(process.cwd(), 'data/nodes.bin')
+    : path.join(__dirname, "../../../data/nodes.bin");
 
 async function loadPlacesFromBinary(): Promise<void> {
     if (placesLoaded) return;

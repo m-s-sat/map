@@ -13,11 +13,10 @@ class CppEngineService {
     }
 
     private startProcess() {
-        const isProduction = process.env.NODE_ENV === 'production';
         const fs = require('fs');
+        const isProduction = process.env.NODE_ENV === 'production';
 
         let cppPath: string;
-        let dataDir: string;
 
         const prodPath = path.join(process.cwd(), 'cpp-engine/src/map_v2');
         const devPath = path.join(__dirname, "../../../cpp-engine/src/map_v2.exe");
@@ -25,12 +24,14 @@ class CppEngineService {
         if (fs.existsSync(prodPath)) {
             console.log("Using production C++ path");
             cppPath = prodPath;
-            dataDir = path.join(process.cwd(), 'data') + path.sep;
         } else {
             console.log("Using development C++ path");
             cppPath = devPath;
-            dataDir = path.join(__dirname, "../../../data") + path.sep;
         }
+
+        const dataDir = isProduction
+            ? path.join(process.cwd(), 'data') + path.sep
+            : path.join(__dirname, "../../../data") + path.sep;
 
         console.log("Spawning C++ engine:", cppPath, "with data from", dataDir);
         this.process = spawn(cppPath, [dataDir]);
