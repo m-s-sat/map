@@ -11,11 +11,11 @@ class CppEngineService {
     private starting: boolean = false;
 
     constructor() {
-        console.log("C++ engine (lazy-load mode - starts on first route query)");
+        this.startProcess();
     }
 
-    private async startProcess(): Promise<boolean> {
-        if (this.disabled || this.starting || this.process) return !!this.isReady;
+    private startProcess() {
+        if (this.disabled || this.starting || this.process) return;
 
         this.starting = true;
         const isProduction = process.env.NODE_ENV === 'production';
@@ -23,20 +23,24 @@ class CppEngineService {
         const prodPath = path.join(process.cwd(), 'cpp-engine/src/map_v2');
         const devPath = path.join(__dirname, "../../../cpp-engine/src/map_v2.exe");
 
-        let cppPath = fs.existsSync(prodPath) ? prodPath : devPath;
+        let cppPath = isProduction ? prodPath : devPath;
+        if (!fs.existsSync(cppPath)) {
+            cppPath = isProduction ? devPath : prodPath;
+        }
 
         if (!fs.existsSync(cppPath)) {
             console.log("C++ binary not found, routing disabled");
             this.disabled = true;
             this.starting = false;
-            return false;
+            return;
         }
 
         const dataDir = isProduction
-            ? path.join(process.cwd(), 'data') + path.sep
-            : path.join(__dirname, "../../../data") + path.sep;
+            ? path.join(process.cwd(), 'data') + '/'
+            : path.join(__dirname, "../../../data") + '/';
 
         console.log("Starting C++ engine:", cppPath);
+        console.log("Data directory:", dataDir);
 
         try {
             this.process = spawn(cppPath, [dataDir], { stdio: ['pipe', 'pipe', 'pipe'] });
@@ -44,7 +48,7 @@ class CppEngineService {
             console.error("Failed to start C++ engine:", e);
             this.disabled = true;
             this.starting = false;
-            return false;
+            return;
         }
 
         this.process.stdout.on("data", (data) => {
@@ -69,29 +73,28 @@ class CppEngineService {
 
         this.process.stderr.on("data", (data) => {
             const msg = data.toString();
+            console.log("[CPP-LOG]:", msg.trim());
             if (msg.includes("Ready for queries")) {
                 this.isReady = true;
                 this.starting = false;
+                console.log("C++ routing engine ready!");
             }
         });
 
-        this.process.on("close", () => {
+        this.process.on("close", (code) => {
+            console.log("C++ process exited with code", code);
             this.isReady = false;
             this.process = null;
             this.starting = false;
         });
-
-        await new Promise(r => setTimeout(r, 3000));
-        this.starting = false;
-        return this.isReady;
     }
 
     public async query(source: number, destination: number): Promise<{ distance: number, path: number[] } | null> {
         if (this.disabled) return null;
 
         if (!this.process || !this.isReady) {
-            const started = await this.startProcess();
-            if (!started) return null;
+            await new Promise(r => setTimeout(r, 5000));
+            if (!this.isReady) return null;
         }
 
         return new Promise((resolve) => {
