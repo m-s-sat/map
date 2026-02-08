@@ -5,6 +5,14 @@ COPY cpp-engine/ ./
 
 RUN g++ -O3 -std=c++17 -o map_v2 src/main.cpp src/graph.cpp -I include
 
+FROM --platform=linux/amd64 node:20 AS ts-builder
+
+WORKDIR /app
+COPY backend/package*.json ./
+RUN npm ci
+COPY backend/ ./
+RUN npm run build
+
 FROM --platform=linux/amd64 node:20-slim
 
 WORKDIR /app
@@ -16,10 +24,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 COPY backend/package*.json ./
-RUN npm ci
+RUN npm ci --only=production
 
-COPY backend/ ./
-RUN npm run build
+COPY --from=ts-builder /app/dist ./dist
 
 COPY --from=cpp-builder /cpp-build/map_v2 ./cpp-engine/src/map_v2
 RUN chmod +x ./cpp-engine/src/map_v2
