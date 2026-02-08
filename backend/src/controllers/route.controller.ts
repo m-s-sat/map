@@ -3,41 +3,28 @@ import routeService from "../services/route.service";
 import fs from "fs";
 import path from "path";
 
-interface NodeData {
-  id: number;
-  lat: number;
-  lon: number;
+const isProduction = process.env.NODE_ENV === 'production';
+const nodesBinFile = isProduction
+  ? path.join(process.cwd(), 'data/nodes.bin')
+  : path.join(__dirname, "../../../data/nodes.bin");
+
+let nodesFd: number | null = null;
+let nodeCount = 0;
+
+function initNodes() {
+  if (nodesFd) return;
+  if (fs.existsSync(nodesBinFile)) {
+    const stats = fs.statSync(nodesBinFile);
+    nodeCount = stats.size / 16;
+    nodesFd = fs.openSync(nodesBinFile, 'r');
+  }
 }
 
-let nodesData: NodeData[] | null = null;
-
-function loadNodes(): NodeData[] {
-  if (nodesData) return nodesData;
-
-  const isProduction = process.env.NODE_ENV === 'production';
-  const nodesBinFile = isProduction
-    ? path.join(process.cwd(), 'data/nodes.bin')
-    : path.join(__dirname, "../../../data/nodes.bin");
-
-  if (!fs.existsSync(nodesBinFile)) {
-    return [];
-  }
-
-  const buffer = fs.readFileSync(nodesBinFile);
-  const nodeCount = buffer.length / 16;
-
-  const nodes: NodeData[] = new Array(nodeCount);
-  for (let i = 0; i < nodeCount; i++) {
-    const offset = i * 16;
-    nodes[i] = {
-      id: i,
-      lat: buffer.readDoubleLE(offset),
-      lon: buffer.readDoubleLE(offset + 8),
-    };
-  }
-
-  nodesData = nodes;
-  return nodes;
+function readNode(index: number): { lat: number; lon: number } | null {
+  if (!nodesFd || index < 0 || index >= nodeCount) return null;
+  const buf = Buffer.alloc(16);
+  fs.readSync(nodesFd, buf, 0, 16, index * 16);
+  return { lat: buf.readDoubleLE(0), lon: buf.readDoubleLE(8) };
 }
 
 export const getRoute = async (req: Request, res: Response) => {
@@ -45,28 +32,24 @@ export const getRoute = async (req: Request, res: Response) => {
     const { source, destination } = req.body;
 
     if (source === undefined || destination === undefined) {
-      return res.status(400).json({
-        error: "source and destination required",
-      });
+      return res.status(400).json({ error: "source and destination required" });
     }
 
     const result = await routeService.getRoute(source, destination);
 
     if (!result) {
-      return res.status(404).json({
-        error: "No path found between source and destination",
+      return res.status(503).json({
+        error: "Routing service unavailable (disabled for low-memory mode)"
       });
     }
 
-    const nodes = loadNodes();
+    initNodes();
     const coordinates: { lat: number; lon: number }[] = [];
 
     for (const nodeId of result.path) {
-      if (nodeId < nodes.length && nodes[nodeId]) {
-        coordinates.push({
-          lat: nodes[nodeId].lat,
-          lon: nodes[nodeId].lon,
-        });
+      const node = readNode(nodeId);
+      if (node) {
+        coordinates.push(node);
       }
     }
 
@@ -79,8 +62,6 @@ export const getRoute = async (req: Request, res: Response) => {
 
   } catch (err) {
     console.error("Routing error:", err);
-    res.status(500).json({
-      error: "Routing failed",
-    });
+    res.status(500).json({ error: "Routing failed" });
   }
 };

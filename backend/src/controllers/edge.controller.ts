@@ -11,9 +11,9 @@ interface Edge {
     toLon: number;
 }
 
-let nodesBuffer: Buffer | null = null;
-let offsetBuffer: Buffer | null = null;
-let targetsBuffer: Buffer | null = null;
+let nodesFd: number | null = null;
+let offsetFd: number | null = null;
+let targetsFd: number | null = null;
 let nodeCount = 0;
 let isLoaded = false;
 
@@ -28,38 +28,54 @@ const targetsFile = isProduction
     ? path.join(process.cwd(), 'data/graph.targets')
     : path.join(__dirname, "../../../data/graph.targets");
 
-function loadData(): void {
+function initEdges(): void {
     if (isLoaded) return;
 
-    if (!fs.existsSync(nodesBinFile)) {
-        isLoaded = true;
-        return;
+    try {
+        if (fs.existsSync(nodesBinFile)) {
+            const stats = fs.statSync(nodesBinFile);
+            nodeCount = stats.size / 16;
+            nodesFd = fs.openSync(nodesBinFile, 'r');
+        }
+        if (fs.existsSync(offsetFile)) {
+            offsetFd = fs.openSync(offsetFile, 'r');
+        }
+        if (fs.existsSync(targetsFile)) {
+            targetsFd = fs.openSync(targetsFile, 'r');
+        }
+        console.log(`Edges ready: streaming mode (no memory used)`);
+    } catch (e) {
+        console.error("Edge init error:", e);
     }
-
-    const nodeBuffer = fs.readFileSync(nodesBinFile);
-    if (nodeBuffer.length % 16 !== 0) {
-        isLoaded = true;
-        return;
-    }
-
-    nodesBuffer = nodeBuffer;
-    nodeCount = nodeBuffer.length / 16;
-
-    if (!fs.existsSync(offsetFile) || !fs.existsSync(targetsFile)) {
-        isLoaded = true;
-        return;
-    }
-
-    offsetBuffer = fs.readFileSync(offsetFile);
-    targetsBuffer = fs.readFileSync(targetsFile);
     isLoaded = true;
 }
 
-setTimeout(() => loadData(), 500);
+setTimeout(() => initEdges(), 200);
+
+function readNode(index: number): { lat: number; lon: number } | null {
+    if (!nodesFd || index < 0 || index >= nodeCount) return null;
+    const buf = Buffer.alloc(16);
+    fs.readSync(nodesFd, buf, 0, 16, index * 16);
+    return { lat: buf.readDoubleLE(0), lon: buf.readDoubleLE(8) };
+}
+
+function readOffset(index: number): number {
+    if (!offsetFd) return 0;
+    const buf = Buffer.alloc(4);
+    fs.readSync(offsetFd, buf, 0, 4, index * 4);
+    return buf.readUInt32LE(0);
+}
+
+function readTarget(index: number): number {
+    if (!targetsFd) return -1;
+    const buf = Buffer.alloc(4);
+    fs.readSync(targetsFd, buf, 0, 4, index * 4);
+    return buf.readInt32LE(0);
+}
 
 export const getEdges = async (req: Request, res: Response) => {
     try {
-        if (!isLoaded || !nodesBuffer || !offsetBuffer || !targetsBuffer) {
+        if (!isLoaded || !nodesFd || !offsetFd || !targetsFd) {
             return res.json({ edges: [] });
         }
 
@@ -77,53 +93,39 @@ export const getEdges = async (req: Request, res: Response) => {
         };
 
         const edges: Edge[] = [];
-        const maxEdges = 2000;
+        const maxEdges = 1500;
+        const step = Math.max(1, Math.floor(nodeCount / 30000));
 
-        const sampleRate = Math.max(1, Math.floor(nodeCount / 50000));
+        for (let u = 0; u < nodeCount && edges.length < maxEdges; u += step) {
+            const uNode = readNode(u);
+            if (!uNode) continue;
 
-        for (let u = 0; u < nodeCount; u += sampleRate) {
-            const uOffset = u * 16;
-            const uLat = nodesBuffer.readDoubleLE(uOffset);
-            const uLon = nodesBuffer.readDoubleLE(uOffset + 8);
+            if (uNode.lat >= bounds.minLat && uNode.lat <= bounds.maxLat &&
+                uNode.lon >= bounds.minLon && uNode.lon <= bounds.maxLon) {
 
-            if (uLat >= bounds.minLat && uLat <= bounds.maxLat &&
-                uLon >= bounds.minLon && uLon <= bounds.maxLon) {
+                const startOff = readOffset(u);
+                const endOff = readOffset(u + 1);
 
-                const startOff = offsetBuffer.readUInt32LE(u * 4);
-                const endOff = offsetBuffer.readUInt32LE((u + 1) * 4);
+                for (let i = startOff; i < endOff && edges.length < maxEdges; i++) {
+                    const v = readTarget(i);
+                    if (v < 0 || v >= nodeCount) continue;
 
-                for (let i = startOff; i < endOff; i++) {
-                    const vToken = i * 4;
-                    if (vToken + 4 > targetsBuffer.length) break;
+                    const vNode = readNode(v);
+                    if (!vNode) continue;
 
-                    const v = targetsBuffer.readInt32LE(vToken);
-
-                    if (v < nodeCount) {
-                        const vOffset = v * 16;
-                        const vLat = nodesBuffer.readDoubleLE(vOffset);
-                        const vLon = nodesBuffer.readDoubleLE(vOffset + 8);
-
-                        edges.push({
-                            from: u,
-                            to: v,
-                            fromLat: uLat,
-                            fromLon: uLon,
-                            toLat: vLat,
-                            toLon: vLon
-                        });
-
-                        if (edges.length >= maxEdges) break;
-                    }
+                    edges.push({
+                        from: u,
+                        to: v,
+                        fromLat: uNode.lat,
+                        fromLon: uNode.lon,
+                        toLat: vNode.lat,
+                        toLon: vNode.lon
+                    });
                 }
-                if (edges.length >= maxEdges) break;
             }
         }
 
-        res.json({
-            edges,
-            total: edges.length
-        });
-
+        res.json({ edges, total: edges.length });
     } catch (error) {
         res.status(500).json({ error: "Internal server error" });
     }
