@@ -8,16 +8,21 @@ export default function runCpp(
 
     return new Promise((resolve, reject) => {
         const isProduction = process.env.NODE_ENV === 'production';
+        const fs = require('fs');
+
         let cppPath: string;
         let nodesPath: string;
         let edgesPath: string;
 
-        if (isProduction) {
-            cppPath = path.join(process.cwd(), 'cpp-engine/src/map_v2');
+        const prodPath = path.join(process.cwd(), 'cpp-engine/src/map_v2');
+        const devPath = path.join(__dirname, "../../../cpp-engine/src/map.exe");
+
+        if (fs.existsSync(prodPath)) {
+            cppPath = prodPath;
             nodesPath = path.join(process.cwd(), 'data/nodes.txt');
             edgesPath = path.join(process.cwd(), 'data/edges.txt');
         } else {
-            cppPath = path.join(__dirname, "../../../cpp-engine/src/map.exe");
+            cppPath = devPath;
             nodesPath = path.join(__dirname, "../../../data/nodes.txt");
             edgesPath = path.join(__dirname, "../../../data/edges.txt");
         }

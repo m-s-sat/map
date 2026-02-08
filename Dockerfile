@@ -23,6 +23,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
+ENV NODE_ENV=production
+
 COPY backend/package*.json ./
 RUN npm ci --only=production
 

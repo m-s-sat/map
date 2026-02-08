@@ -14,15 +14,21 @@ class CppEngineService {
 
     private startProcess() {
         const isProduction = process.env.NODE_ENV === 'production';
+        const fs = require('fs');
 
         let cppPath: string;
         let dataDir: string;
 
-        if (isProduction) {
-            cppPath = path.join(process.cwd(), 'cpp-engine/src/map_v2');
+        const prodPath = path.join(process.cwd(), 'cpp-engine/src/map_v2');
+        const devPath = path.join(__dirname, "../../../cpp-engine/src/map_v2.exe");
+
+        if (fs.existsSync(prodPath)) {
+            console.log("Using production C++ path");
+            cppPath = prodPath;
             dataDir = path.join(process.cwd(), 'data') + path.sep;
         } else {
-            cppPath = path.join(__dirname, "../../../cpp-engine/src/map_v2.exe");
+            console.log("Using development C++ path");
+            cppPath = devPath;
             dataDir = path.join(__dirname, "../../../data") + path.sep;
         }
 
