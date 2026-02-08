@@ -1,6 +1,4 @@
 #!/bin/bash
-# Download large data files from AWS S3 during deployment
-# Run this script before building the Docker image
 
 set -e
 
@@ -11,7 +9,6 @@ mkdir -p $DATA_DIR
 
 echo "Downloading data files from S3..."
 
-# Large files to download
 FILES=(
     "nodes.bin"
     "nodes.txt"
