@@ -38,6 +38,15 @@ async function loadPlacesFromBinary(): Promise<void> {
 
     const buffer = fs.readFileSync(binFile);
     const placeCount = buffer.readUInt32LE(0);
+
+    // Safety check for file size vs count
+    const minExpectedSize = 4 + (placeCount * 97); // Header + records (approx)
+    if (buffer.length < minExpectedSize) {
+        console.error(`[PLACES] Binary file too small. Expected at least ${minExpectedSize} bytes, got ${buffer.length}.`);
+        console.error(`[PLACES] File likely corrupt or download failed.`);
+        placesLoaded = true;
+        return;
+    }
     console.log(`[PLACES] Reading ${placeCount.toLocaleString()} places...`);
 
     const RECORD_SIZE = 97;

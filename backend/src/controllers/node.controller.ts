@@ -30,6 +30,12 @@ function loadNodesBinary(): void {
     const startTime = Date.now();
 
     const buffer = fs.readFileSync(nodesBinFile);
+    if (buffer.length % 16 !== 0) {
+        console.error(`[NODES] Invalid binary file size: ${buffer.length} bytes. Expected multiple of 16.`);
+        console.error(`[NODES] Please check if the file was downloaded correctly (e.g. S3 URL issues).`);
+        isLoaded = true; // Prevent retry loop crashing
+        return;
+    }
     const nodeCount = buffer.length / 16;
 
     console.log(`Binary file has ${nodeCount.toLocaleString()} nodes (${(buffer.length / 1024 / 1024).toFixed(2)} MB)`);
