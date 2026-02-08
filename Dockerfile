@@ -46,7 +46,7 @@ RUN curl -f -L -o ./data/nodes.bin "$S3_BUCKET_URL/nodes.bin" && \
 
 EXPOSE 8080
 
-HEALTHCHECK --interval=30s --timeout=10s --start-period=60s \
+HEALTHCHECK --interval=30s --timeout=30s --start-period=120s \
     CMD curl -f http://localhost:8080/api/nodes/stats || exit 1
 
 CMD ["node", "dist/server.js"]
