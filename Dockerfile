@@ -24,6 +24,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 ENV NODE_ENV=production
+ENV NODE_OPTIONS="--max-old-space-size=4096"
 
 COPY backend/package*.json ./
 RUN npm ci --only=production
