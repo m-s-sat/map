@@ -34,7 +34,9 @@ class CppEngineService {
             : path.join(__dirname, "../../../data") + path.sep;
 
         console.log("Spawning C++ engine:", cppPath, "with data from", dataDir);
-        this.process = spawn(cppPath, [dataDir]);
+        this.process = spawn(cppPath, [dataDir], {
+            stdio: ['pipe', 'pipe', 'pipe']
+        });
 
         this.process.stdout.on("data", (data) => {
             this.buffer += data.toString();
@@ -73,6 +75,14 @@ class CppEngineService {
             console.log(`C++ process exited with code ${code}`);
             this.isReady = false;
             this.process = null;
+
+            while (this.queue.length > 0) {
+                const req = this.queue.shift();
+                if (req) req.resolve(null);
+            }
+
+            console.log("Restarting C++ engine in 2 seconds...");
+            setTimeout(() => this.startProcess(), 2000);
         });
     }
 
