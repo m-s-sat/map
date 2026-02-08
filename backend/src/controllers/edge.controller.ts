@@ -45,7 +45,17 @@ function loadData(): void {
     }
 
     const nodeBuffer = fs.readFileSync(nodesBinFile);
+
+    if (nodeBuffer.length % 16 !== 0) {
+        console.error(`[EDGES] Invalid nodes.bin size: ${nodeBuffer.length} bytes. Expected multiple of 16.`);
+        console.error(`[EDGES] The file appears to be corrupt or is an error message from S3.`);
+        console.error(`[EDGES] Please verify your S3 bucket URL and file permissions.`);
+        isLoaded = true;
+        return;
+    }
+
     const nodeCount = nodeBuffer.length / 16;
+    console.log(`[EDGES] Loaded ${nodeCount.toLocaleString()} nodes`);
 
     nodesData = new Array(nodeCount);
     for (let i = 0; i < nodeCount; i++) {
