@@ -11,7 +11,7 @@ class CppEngineService {
     private disabled: boolean = false;
 
     constructor() {
-        this.startProcess();
+        console.log("C++ engine service initialized (lazy-load mode - will start on first query)");
     }
 
     private startProcess() {
