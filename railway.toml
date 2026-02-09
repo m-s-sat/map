@@ -1,7 +1,7 @@
 [build]
 builder = "dockerfile"
 dockerfilePath = "Dockerfile"
-watchPatterns = ["**/*"]
+watchPatterns = ["backend/**", "cpp-engine/**", "Dockerfile", "railway.toml"]
 
 [deploy]
 healthcheckPath = "/api/nodes/stats"

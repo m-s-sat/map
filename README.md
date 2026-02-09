@@ -258,6 +258,18 @@ NODE_OPTIONS=--max-old-space-size=512
 - Auto-restarts on failure
 - HTTPS enabled automatically
 
+**5. Smart Rebuilds (Cost Saving):**
+
+We configured `railway.toml` to only rebuild when relevant code changes:
+
+```toml
+[build]
+# Only continuously deploy when these folders change
+watchPatterns = ["backend/**", "cpp-engine/**", "Dockerfile"]
+```
+
+This prevents unnecessary rebuilds (and billing) when you only change the frontend or documentation.
+
 ---
 
 ### Frontend Deployment (Vercel)
