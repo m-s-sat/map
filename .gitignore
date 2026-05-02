@@ -42,3 +42,16 @@ cpp-engine/src/*.exe
 # Keep these in git (smaller files)
 # data/places.bin (0.5 MB) - OK
 # data/graph.offset (64 MB) - OK
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+crash.log
+*.tfvars
+*.tfvars.json
+override.tf
+override.tf.json
+_override.tf
+_override.tf.json
+.terraform.lock.hcl
