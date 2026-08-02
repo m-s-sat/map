@@ -25,9 +25,7 @@ RUN npm ci --only=production
 
 COPY --from=ts-builder /app/dist ./dist
 COPY --from=cpp-builder /app/src/map_v2 ./cpp-engine/src/map_v2
-
-# data/ is mounted in at runtime (see docker-compose.yml) rather than baked
-# into the image - it's ~700MB and changes independently of the code.
+COPY data/ ./data/
 
 EXPOSE 8080
 

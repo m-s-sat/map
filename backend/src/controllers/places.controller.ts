@@ -74,9 +74,6 @@ async function loadPlacesFromBinary(): Promise<void> {
     }
 
     if (fs.existsSync(nodesBinFile)) {
-        const nodesBuffer = fs.readFileSync(nodesBinFile);
-        const nodeCount = nodesBuffer.length / 16;
-
         const GRID_SIZE = 0.01;
         const grid = new Map<string, number[]>();
 
@@ -106,26 +103,43 @@ async function loadPlacesFromBinary(): Promise<void> {
             }
         }
 
-        for (let i = 0; i < nodeCount; i++) {
-            const offset = i * 16;
-            const lat = nodesBuffer.readDoubleLE(offset);
-            const lon = nodesBuffer.readDoubleLE(offset + 8);
+        // Stream nodes.bin in fixed-size chunks instead of reading the whole
+        // (257MB+) file into memory at once - only needed once at startup to
+        // resolve each place's nearest graph node.
+        const nodesFd = fs.openSync(nodesBinFile, 'r');
+        const nodesSize = fs.statSync(nodesBinFile).size;
+        const nodeCount = nodesSize / 16;
+        const CHUNK_NODES = 65536;
+        const chunk = Buffer.alloc(CHUNK_NODES * 16);
 
-            const key = getGridKey(lat, lon);
-            const relevantPlaces = grid.get(key);
+        for (let base = 0; base < nodeCount; base += CHUNK_NODES) {
+            const nodesInChunk = Math.min(CHUNK_NODES, nodeCount - base);
+            fs.readSync(nodesFd, chunk, 0, nodesInChunk * 16, base * 16);
 
-            if (relevantPlaces) {
-                for (const placeIdx of relevantPlaces) {
-                    const p = placesIndex[placeIdx];
-                    const d = (p.lat - lat) ** 2 + (p.lon - lon) ** 2;
+            for (let j = 0; j < nodesInChunk; j++) {
+                const i = base + j;
+                const offset = j * 16;
+                const lat = chunk.readDoubleLE(offset);
+                const lon = chunk.readDoubleLE(offset + 8);
 
-                    if (d < placeDistances[placeIdx]) {
-                        placeDistances[placeIdx] = d;
-                        p.nodeId = i;
+                const key = getGridKey(lat, lon);
+                const relevantPlaces = grid.get(key);
+
+                if (relevantPlaces) {
+                    for (const placeIdx of relevantPlaces) {
+                        const p = placesIndex[placeIdx];
+                        const d = (p.lat - lat) ** 2 + (p.lon - lon) ** 2;
+
+                        if (d < placeDistances[placeIdx]) {
+                            placeDistances[placeIdx] = d;
+                            p.nodeId = i;
+                        }
                     }
                 }
             }
         }
+
+        fs.closeSync(nodesFd);
     }
 
     placesLoaded = true;

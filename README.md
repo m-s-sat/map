@@ -19,14 +19,14 @@ A **production-grade routing application** that handles **17 million nodes** and
 ┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
 │    Frontend     │────▶│    Backend      │────▶│   C++ Engine    │
 │   (Next.js)     │     │   (Express)     │     │      (A*)       │
-│    Vercel       │     │ Azure Students  │     │   Memory-Mapped │
-│                 │     │   (Free VM)     │     │                 │
+│    Vercel       │     │     Render      │     │   Memory-Mapped │
+│                 │     │  (Free, Docker) │     │                 │
 └─────────────────┘     └─────────────────┘     └─────────────────┘
                               │
                               ▼
                     ┌─────────────────────┐
                     │   Binary Data Files │
-                    │  (host volume mount)│
+                    │ (baked into image)  │
                     └─────────────────────┘
 ```
 
@@ -143,8 +143,8 @@ with open('nodes.bin', 'wb') as f:
 | Backend        | Node.js, Express, TypeScript         |
 | Routing Engine | C++17, A* Algorithm                  |
 | Data Format    | Custom Binary (mmap-compatible)      |
-| Hosting        | Vercel (Frontend), Azure for Students (Backend) |
-| Data Storage   | Git LFS (large files ship with the repo)       |
+| Hosting        | Vercel (Frontend), Render (Backend)  |
+| Data Storage   | Git LFS, baked into the Docker image at build time |
 
 ---
 
@@ -196,16 +196,16 @@ We use a **split deployment** strategy, entirely on free tiers:
 │     │                                                             │
 │     ▼                                                             │
 │   ┌─────────────┐    API calls    ┌─────────────────────────┐   │
-│   │   Vercel    │ ──────────────▶ │   Azure for Students VM │   │
-│   │  (Frontend) │                 │   (B-series, x86_64)    │   │
+│   │   Vercel    │ ──────────────▶ │   Render (free plan)    │   │
+│   │  (Frontend) │                 │   Docker web service    │   │
 │   │   Next.js   │                 │  Node.js + C++ Engine   │   │
-│   │    FREE     │                 │   FREE ($100 credit,    │   │
-│   │             │                 │   no card required)     │   │
+│   │    FREE     │                 │   FREE (no card,        │   │
+│   │             │                 │   512MB RAM)            │   │
 │   └─────────────┘                 └───────────┬─────────────┘   │
 │                                               │                   │
 │                                               ▼                   │
 │                                   ┌─────────────────────┐        │
-│                                   │   VM disk / volume  │        │
+│                                   │  Baked into image   │        │
 │                                   │   715 MB binaries   │        │
 │                                   └─────────────────────┘        │
 │                                                                   │
@@ -217,48 +217,36 @@ We use a **split deployment** strategy, entirely on free tiers:
 | Concern          | Solution                                                                                                                          |
 | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
 | Frontend CDN     | Vercel's global edge network                                                                                                      |
-| Backend compute  | A single Azure for Students VM (a real persistent process, not serverless — needed because the C++ engine mmaps ~715MB and stays resident between requests) |
-| Large data files | Shipped via Git LFS, pulled onto the VM's disk by `git clone`, mounted into the container                                          |
-| Cost             | **$0 upfront** — no card required to sign up; the VM itself draws down a renewable $100/12-month credit                            |
+| Backend compute  | Render's free Docker web service — no card required. 512MB looked tight on paper, but testing under a real 512MB cap showed the mmap-based engine barely touches it; see [DEPLOYMENT.md](DEPLOYMENT.md) for the memory fix that made this hold up |
+| Large data files | Shipped via Git LFS, baked into the Docker image at build time (Render's free plan has no persistent disk)                        |
+| Cost             | **$0** — no card, no credit to track or renew                                                                                      |
 
-Vercel serverless functions were considered for the backend too, but don't fit: their stable bundle limit is 250MB and this graph is ~715MB — the only way around that is Vercel's beta "Large Functions" (5GB) feature, which we chose not to depend on for production. A single free VM with a normal persistent process sidesteps that entirely.
+Vercel serverless functions were considered for the backend too, but don't fit: their stable bundle limit is 250MB and this graph is ~715MB — the only way around that is Vercel's beta "Large Functions" (5GB) feature. Render's Docker-based services have no such bundle limit, which is why the same Dockerfile works there directly.
 
 ---
 
-### Backend Deployment (Azure for Students VM)
+### Backend Deployment (Render)
 
-Runs via plain Docker Compose — no Kubernetes needed for a single box. Full step-by-step (Azure Portal screens, NSG rules, credit planning) is in [DEPLOYMENT.md](DEPLOYMENT.md); summary here:
+Runs from [render.yaml](render.yaml) as a Docker-based "Blueprint" service — no Kubernetes, no manual VM setup. Full step-by-step is in [DEPLOYMENT.md](DEPLOYMENT.md); summary here:
 
-**1. Sign up and provision the VM**
+**1. Push code + data to GitHub**
 
-Verify at [azure.microsoft.com/free/students](https://azure.microsoft.com/en-us/free/students) (school email, no card), then create an Ubuntu 22.04 VM sized to match what's already been tested (e.g. **Standard_B2s**, 2 vCPU/4GB), opening ports 8080 (and 80/443 for Caddy) in its Network Security Group.
-
-**2. Install Docker and Git LFS, then clone the repo**
-
+The large data files are tracked via Git LFS, so a normal push carries everything:
 ```bash
-curl -fsSL https://get.docker.com | sudo sh
-sudo apt-get install -y git-lfs && git lfs install
-git clone https://github.com/m-s-sat/map.git
-cd map
+git add . && git commit -m "Deploy setup" && git push origin main
 ```
 
-Since the large data files are tracked with Git LFS, `git clone` pulls `nodes.bin`, `graph.weights`, and `graph.targets` along with everything else — no separate data-transfer step needed.
+**2. Connect the repo on Render**
 
-**3. Build and run**
+[dashboard.render.com](https://dashboard.render.com) → sign up with GitHub (no card needed for the free plan) → connect this repo. Render auto-detects `render.yaml` and creates the service — Docker runtime, free instance type, `NODE_OPTIONS=--max-old-space-size=200` already set to leave more headroom for the C++ engine within the 512MB limit.
 
-```bash
-docker compose up -d --build
-```
+**3. First build**
 
-`docker-compose.yml` builds the same multi-stage [Dockerfile](Dockerfile) and mounts `./data` into the container read-only, so re-deploying code (`git pull && docker compose up -d --build`) never re-pulls the 715MB dataset unless it actually changed.
+Render's build compiles the C++ engine, builds the TypeScript backend, and copies in the ~715MB dataset — the first build takes a few minutes given the image size. Watch the logs for `C++ routing engine ready!`.
 
-**4. Optional: HTTPS via Caddy**
+**4. Resilience trade-off**
 
-If you want a real domain (e.g. `api.ms-sat.live`), point it at the VM and run Caddy in front using the included [Caddyfile](Caddyfile) — it auto-provisions and renews a Let's Encrypt certificate with no extra config.
-
-**5. Resilience**
-
-`docker-compose.yml` sets `restart: unless-stopped`, so the container comes back up automatically after a crash or VM reboot.
+Unlike a VM, Render's free plan sleeps after 15 minutes idle, giving a 30-60s cold start on the next request — a deliberate trade-off for zero cost and zero payment info. The 512MB RAM ceiling looked riskier on paper than it turned out to be in testing; see [DEPLOYMENT.md](DEPLOYMENT.md) for details.
 
 ---
 
@@ -281,8 +269,10 @@ vercel.com → Add New Project → Import from GitHub
 **3. Environment variable:**
 
 ```
-NEXT_PUBLIC_API_URL=https://api.ms-sat.live
+NEXT_PUBLIC_API_URL=https://map-backend-xxxx.onrender.com
 ```
+
+(Or a custom domain, configurable directly in Render's dashboard.)
 
 **4. Benefits:**
 
