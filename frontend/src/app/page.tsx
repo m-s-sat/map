@@ -6,8 +6,8 @@ import RoutePanel from "@/components/route-panel";
 const MapView = dynamic(() => import("@/components/map-view"), {
   ssr: false,
   loading: () => (
-    <div className="w-full h-full bg-slate-900 flex items-center justify-center">
-      <div className="animate-pulse text-slate-400">Loading map...</div>
+    <div className="w-full h-full bg-slate-950 flex items-center justify-center">
+      <div className="animate-pulse text-slate-500 text-sm font-medium">Loading map...</div>
     </div>
   ),
 });

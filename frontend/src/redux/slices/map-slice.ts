@@ -15,6 +15,8 @@ interface RouteResult {
 interface MapState {
     source: number | null;
     destination: number | null;
+    sourceName: string | null;
+    destinationName: string | null;
     route: RouteResult | null;
     loading: boolean;
     error: string | null;
@@ -24,6 +26,8 @@ interface MapState {
 const initialState: MapState = {
     source: null,
     destination: null,
+    sourceName: null,
+    destinationName: null,
     route: null,
     loading: false,
     error: null,
@@ -59,6 +63,12 @@ const mapSlice = createSlice({
         setDestination: (state, action: PayloadAction<number | null>) => {
             state.destination = action.payload;
         },
+        setSourceName: (state, action: PayloadAction<string | null>) => {
+            state.sourceName = action.payload;
+        },
+        setDestinationName: (state, action: PayloadAction<string | null>) => {
+            state.destinationName = action.payload;
+        },
         clearRoute: (state) => {
             state.route = null;
             state.error = null;
@@ -88,5 +98,5 @@ const mapSlice = createSlice({
     },
 });
 
-export const { setSource, setDestination, clearRoute, setNodes } = mapSlice.actions;
+export const { setSource, setDestination, setSourceName, setDestinationName, clearRoute, setNodes } = mapSlice.actions;
 export default mapSlice.reducer;
