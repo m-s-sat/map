@@ -160,44 +160,43 @@ void Graph::loadBinary(const string& prefix){
          << " MB (actual RAM usage is minimal)" << endl;
 }
 
-pair<double, vector<int>> Graph::dijkstra(int src, int dest){
+pair<double, vector<int>> Graph::aStar(int src, int dest){
     if(src < 0 || (size_t)src >= numNodes || dest < 0 || (size_t)dest >= numNodes) return {0.0, {}};
-    
+
+    double destLat = nodes[dest].lat, destLon = nodes[dest].lon;
+
     priority_queue<pair<double, int>, vector<pair<double, int>>, greater<>> pq;
     vector<double> dist(numNodes, 1e18);
     vector<int> parent(numNodes, -1);
-    
+    vector<bool> visited(numNodes, false);
+
     dist[src] = 0;
-    pq.push({0, src});
-    
+    pq.push({haversine(nodes[src].lat, nodes[src].lon, destLat, destLon), src});
+
     while(!pq.empty()){
-        double d = pq.top().first;
         int u = pq.top().second;
         pq.pop();
-        
-        if(d > dist[u]) continue;
+
+        if(visited[u]) continue;
+        visited[u] = true;
         if(u == dest) break;
-        
+
         for(unsigned int i = offsets[u]; i < offsets[u+1]; ++i){
             int v = targets[i];
             double w = weights[i];
-            
+
             if(dist[u] + w < dist[v]){
                 dist[v] = dist[u] + w;
                 parent[v] = u;
-                pq.push({dist[v], v});
+                pq.push({dist[v] + haversine(nodes[v].lat, nodes[v].lon, destLat, destLon), v});
             }
         }
     }
-    
+
     if(dist[dest] == 1e18) return {0.0, {}};
-    
+
     vector<int> path;
     for(int v = dest; v != -1; v = parent[v]) path.push_back(v);
     reverse(path.begin(), path.end());
     return {dist[dest], path};
-}
-
-pair<double, vector<int>> Graph::bidirectionalDijkstra(int src, int dest){
-    return dijkstra(src, dest);
 }

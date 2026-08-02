@@ -22,15 +22,13 @@ out/
 Thumbs.db
 
 # ========================================
-# LARGE DATA FILES (stored externally)
+# LARGE DATA FILES
 # ========================================
-data/nodes.bin
+# nodes.bin, graph.weights, graph.targets are tracked via Git LFS (see .gitattributes)
 data/nodes.txt
 data/edges.txt
-data/graph.weights
-data/graph.targets
 
-# Source data (too large for GitHub)
+# Source data (too large for GitHub, even with LFS bandwidth in mind)
 *.osm.pbf
 map_central_zone.csv
 
@@ -38,20 +36,8 @@ map_central_zone.csv
 cpp-engine/*.exe
 cpp-engine/*.o
 cpp-engine/src/*.exe
+cpp-engine/tools/*.exe
 
-# Keep these in git (smaller files)
+# Keep these in git (smaller files, no LFS needed)
 # data/places.bin (0.5 MB) - OK
 # data/graph.offset (64 MB) - OK
-
-# Terraform
-.terraform/
-*.tfstate
-*.tfstate.*
-crash.log
-*.tfvars
-*.tfvars.json
-override.tf
-override.tf.json
-_override.tf
-_override.tf.json
-.terraform.lock.hcl

@@ -8,7 +8,7 @@ A **production-grade routing application** that handles **17 million nodes** and
 
 - 🗺️ **Interactive Map** - Visualize road network with Leaflet
 - 🔍 **Place Search** - Search 4,000+ named locations
-- 🛣️ **Shortest Path Routing** - Dijkstra's algorithm in C++
+- 🛣️ **Shortest Path Routing** - A* algorithm in C++
 - ⚡ **Memory Optimized** - 17M nodes in under 1GB RAM
 
 ---
@@ -18,14 +18,15 @@ A **production-grade routing application** that handles **17 million nodes** and
 ```
 ┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
 │    Frontend     │────▶│    Backend      │────▶│   C++ Engine    │
-│   (Next.js)     │     │   (Express)     │     │   (Dijkstra)    │
-│    Vercel       │     │    Railway      │     │   Memory-Mapped │
+│   (Next.js)     │     │   (Express)     │     │      (A*)       │
+│    Vercel       │     │ Azure Students  │     │   Memory-Mapped │
+│                 │     │   (Free VM)     │     │                 │
 └─────────────────┘     └─────────────────┘     └─────────────────┘
                               │
                               ▼
                     ┌─────────────────────┐
                     │   Binary Data Files │
-                    │   (S3 - 700MB)      │
+                    │  (host volume mount)│
                     └─────────────────────┘
 ```
 
@@ -140,10 +141,10 @@ with open('nodes.bin', 'wb') as f:
 | -------------- | ------------------------------------ |
 | Frontend       | Next.js 14, React, Leaflet, Redux    |
 | Backend        | Node.js, Express, TypeScript         |
-| Routing Engine | C++17, Dijkstra's Algorithm          |
+| Routing Engine | C++17, A* Algorithm                  |
 | Data Format    | Custom Binary (mmap-compatible)      |
-| Hosting        | Vercel (Frontend), Railway (Backend) |
-| Data Storage   | AWS S3                               |
+| Hosting        | Vercel (Frontend), Azure for Students (Backend) |
+| Data Storage   | Git LFS (large files ship with the repo)       |
 
 ---
 
@@ -184,7 +185,7 @@ cd frontend && npm run dev
 
 ## 🌐 Deployment Architecture
 
-We use a **split deployment** strategy for cost efficiency and scalability:
+We use a **split deployment** strategy, entirely on free tiers:
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -195,80 +196,69 @@ We use a **split deployment** strategy for cost efficiency and scalability:
 │     │                                                             │
 │     ▼                                                             │
 │   ┌─────────────┐    API calls    ┌─────────────────────────┐   │
-│   │   Vercel    │ ──────────────▶ │       Railway           │   │
-│   │  (Frontend) │                 │      (Backend)          │   │
+│   │   Vercel    │ ──────────────▶ │   Azure for Students VM │   │
+│   │  (Frontend) │                 │   (B-series, x86_64)    │   │
 │   │   Next.js   │                 │  Node.js + C++ Engine   │   │
-│   │    FREE     │                 │      $5/month           │   │
+│   │    FREE     │                 │   FREE ($100 credit,    │   │
+│   │             │                 │   no card required)     │   │
 │   └─────────────┘                 └───────────┬─────────────┘   │
 │                                               │                   │
 │                                               ▼                   │
 │                                   ┌─────────────────────┐        │
-│                                   │      AWS S3         │        │
-│                                   │   (Data Storage)    │        │
+│                                   │   VM disk / volume  │        │
 │                                   │   715 MB binaries   │        │
-│                                   │      ~$0.02/month   │        │
 │                                   └─────────────────────┘        │
 │                                                                   │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-### Why Split Deployment?
+### Why This Split?
 
-| Concern          | Solution                      |
-| ---------------- | ----------------------------- |
-| Frontend CDN     | Vercel's global edge network  |
-| Backend compute  | Railway's container hosting   |
-| Large data files | S3 (downloaded at build time) |
-| Cost             | **~$5/month total**           |
+| Concern          | Solution                                                                                                                          |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| Frontend CDN     | Vercel's global edge network                                                                                                      |
+| Backend compute  | A single Azure for Students VM (a real persistent process, not serverless — needed because the C++ engine mmaps ~715MB and stays resident between requests) |
+| Large data files | Shipped via Git LFS, pulled onto the VM's disk by `git clone`, mounted into the container                                          |
+| Cost             | **$0 upfront** — no card required to sign up; the VM itself draws down a renewable $100/12-month credit                            |
+
+Vercel serverless functions were considered for the backend too, but don't fit: their stable bundle limit is 250MB and this graph is ~715MB — the only way around that is Vercel's beta "Large Functions" (5GB) feature, which we chose not to depend on for production. A single free VM with a normal persistent process sidesteps that entirely.
 
 ---
 
-### Backend Deployment (Railway)
+### Backend Deployment (Azure for Students VM)
 
-Railway builds and deploys our Docker container automatically:
+Runs via plain Docker Compose — no Kubernetes needed for a single box. Full step-by-step (Azure Portal screens, NSG rules, credit planning) is in [DEPLOYMENT.md](DEPLOYMENT.md); summary here:
 
-**1. Connect GitHub repo to Railway**
+**1. Sign up and provision the VM**
 
-```
-Railway Dashboard → New Project → Deploy from GitHub
-```
+Verify at [azure.microsoft.com/free/students](https://azure.microsoft.com/en-us/free/students) (school email, no card), then create an Ubuntu 22.04 VM sized to match what's already been tested (e.g. **Standard_B2s**, 2 vCPU/4GB), opening ports 8080 (and 80/443 for Caddy) in its Network Security Group.
 
-**2. Railway auto-detects Dockerfile and builds:**
+**2. Install Docker and Git LFS, then clone the repo**
 
-```dockerfile
-# Multi-stage build
-FROM node:20 AS ts-builder      # Build TypeScript
-FROM gcc:12 AS cpp-builder      # Build C++ routing engine
-FROM node:20-slim               # Final slim image
-
-# Download data from S3 at build time
-RUN curl -o ./data/nodes.bin "$S3_URL/nodes.bin"
+```bash
+curl -fsSL https://get.docker.com | sudo sh
+sudo apt-get install -y git-lfs && git lfs install
+git clone https://github.com/m-s-sat/map.git
+cd map
 ```
 
-**3. Environment variables:**
+Since the large data files are tracked with Git LFS, `git clone` pulls `nodes.bin`, `graph.weights`, and `graph.targets` along with everything else — no separate data-transfer step needed.
 
-```
-NODE_ENV=production
-NODE_OPTIONS=--max-old-space-size=512
-```
+**3. Build and run**
 
-**4. Resources:**
-
-- RAM: 1GB
-- Auto-restarts on failure
-- HTTPS enabled automatically
-
-**5. Smart Rebuilds (Cost Saving):**
-
-We configured `railway.toml` to only rebuild when relevant code changes:
-
-```toml
-[build]
-# Only continuously deploy when these folders change
-watchPatterns = ["backend/**", "cpp-engine/**", "Dockerfile"]
+```bash
+docker compose up -d --build
 ```
 
-This prevents unnecessary rebuilds (and billing) when you only change the frontend or documentation.
+`docker-compose.yml` builds the same multi-stage [Dockerfile](Dockerfile) and mounts `./data` into the container read-only, so re-deploying code (`git pull && docker compose up -d --build`) never re-pulls the 715MB dataset unless it actually changed.
+
+**4. Optional: HTTPS via Caddy**
+
+If you want a real domain (e.g. `api.ms-sat.live`), point it at the VM and run Caddy in front using the included [Caddyfile](Caddyfile) — it auto-provisions and renews a Let's Encrypt certificate with no extra config.
+
+**5. Resilience**
+
+`docker-compose.yml` sets `restart: unless-stopped`, so the container comes back up automatically after a crash or VM reboot.
 
 ---
 
@@ -291,7 +281,7 @@ vercel.com → Add New Project → Import from GitHub
 **3. Environment variable:**
 
 ```
-NEXT_PUBLIC_API_URL=https://map-production-xxxx.up.railway.app
+NEXT_PUBLIC_API_URL=https://api.ms-sat.live
 ```
 
 **4. Benefits:**
@@ -311,7 +301,7 @@ map/
 │   │   │   ├── map-view.tsx      # Leaflet map
 │   │   │   └── place-search.tsx  # Search component
 │   │   └── redux/                # State management
-│   └── .env.production           # Railway URL
+│   └── .env.production           # Backend API URL
 │
 ├── backend/           # Express API server
 │   └── src/
@@ -325,17 +315,17 @@ map/
 ├── cpp-engine/        # C++ routing engine
 │   ├── src/
 │   │   ├── main.cpp   # CLI interface
-│   │   └── graph.cpp  # Dijkstra + mmap
+│   │   └── graph.cpp  # A* + mmap
 │   └── include/
 │       └── graph.h    # Data structures
 │
-├── data/              # Binary data files (not in git)
+├── data/              # Binary data files (nodes.bin/graph.weights/graph.targets via Git LFS)
 │   ├── nodes.bin
 │   ├── graph.offset
 │   ├── graph.targets
 │   └── graph.weights
 │
-└── scripts/           # Data processing
+└── scripts/           # Data processing (OSM extract → CSV → binary)
     ├── extract_osm.py
     └── convert_to_binary.py
 ```
@@ -358,7 +348,7 @@ For web APIs, stream data on-demand rather than loading everything upfront.
 
 ### 4. C++ for Heavy Computation
 
-Dijkstra's algorithm in C++ is 50x faster than JavaScript for graph traversal.
+A* in C++ is 50x faster than JavaScript for graph traversal.
 
 ---
 
