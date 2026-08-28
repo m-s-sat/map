@@ -38,7 +38,7 @@ public:
     void loadEdges(const string& file);
     void loadBinary(const string& prefix);
     
-    pair<double, vector<int>> aStar(int src, int dest);
+    pair<double, vector<int>> dijkstra(int src, int dest);
     
     size_t numNodes = 0;
     size_t numEdges = 0;

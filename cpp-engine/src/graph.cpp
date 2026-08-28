@@ -160,10 +160,8 @@ void Graph::loadBinary(const string& prefix){
          << " MB (actual RAM usage is minimal)" << endl;
 }
 
-pair<double, vector<int>> Graph::aStar(int src, int dest){
+pair<double, vector<int>> Graph::dijkstra(int src, int dest){
     if(src < 0 || (size_t)src >= numNodes || dest < 0 || (size_t)dest >= numNodes) return {0.0, {}};
-
-    double destLat = nodes[dest].lat, destLon = nodes[dest].lon;
 
     priority_queue<pair<double, int>, vector<pair<double, int>>, greater<>> pq;
     vector<double> dist(numNodes, 1e18);
@@ -171,7 +169,7 @@ pair<double, vector<int>> Graph::aStar(int src, int dest){
     vector<bool> visited(numNodes, false);
 
     dist[src] = 0;
-    pq.push({haversine(nodes[src].lat, nodes[src].lon, destLat, destLon), src});
+    pq.push({0, src});
 
     while(!pq.empty()){
         int u = pq.top().second;
@@ -188,7 +186,7 @@ pair<double, vector<int>> Graph::aStar(int src, int dest){
             if(dist[u] + w < dist[v]){
                 dist[v] = dist[u] + w;
                 parent[v] = u;
-                pq.push({dist[v] + haversine(nodes[v].lat, nodes[v].lon, destLat, destLon), v});
+                pq.push({dist[v], v});
             }
         }
     }

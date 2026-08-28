@@ -27,7 +27,7 @@ int main(int argc, char* argv[]) {
 
     int src, dest;
     while(cin >> src >> dest){
-        pair<double, vector<int>> result = g.aStar(src, dest);
+        pair<double, vector<int>> result = g.dijkstra(src, dest);
         
         if (result.second.empty()) {
             cout << "" << endl;

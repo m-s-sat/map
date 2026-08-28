@@ -8,7 +8,7 @@ A **production-grade routing application** that handles **17 million nodes** and
 
 - 🗺️ **Interactive Map** - Visualize road network with Leaflet
 - 🔍 **Place Search** - Search 4,000+ named locations
-- 🛣️ **Shortest Path Routing** - A* algorithm in C++
+- 🛣️ **Shortest Path Routing** - Dijkstra's algorithm in C++
 - ⚡ **Memory Optimized** - 17M nodes in under 1GB RAM
 
 ---
@@ -18,7 +18,7 @@ A **production-grade routing application** that handles **17 million nodes** and
 ```
 ┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
 │    Frontend     │────▶│    Backend      │────▶│   C++ Engine    │
-│   (Next.js)     │     │   (Express)     │     │      (A*)       │
+│   (Next.js)     │     │   (Express)     │     │    (Dijkstra)   │
 │    Vercel       │     │     Render      │     │   Memory-Mapped │
 │                 │     │  (Free, Docker) │     │                 │
 └─────────────────┘     └─────────────────┘     └─────────────────┘
@@ -141,7 +141,7 @@ with open('nodes.bin', 'wb') as f:
 | -------------- | ------------------------------------ |
 | Frontend       | Next.js 14, React, Leaflet, Redux    |
 | Backend        | Node.js, Express, TypeScript         |
-| Routing Engine | C++17, A* Algorithm                  |
+| Routing Engine | C++17, Dijkstra Algorithm            |
 | Data Format    | Custom Binary (mmap-compatible)      |
 | Hosting        | Vercel (Frontend), Render (Backend)  |
 | Data Storage   | Git LFS, baked into the Docker image at build time |
@@ -305,7 +305,7 @@ map/
 ├── cpp-engine/        # C++ routing engine
 │   ├── src/
 │   │   ├── main.cpp   # CLI interface
-│   │   └── graph.cpp  # A* + mmap
+│   │   └── graph.cpp  # Dijkstra + mmap
 │   └── include/
 │       └── graph.h    # Data structures
 │
@@ -338,7 +338,7 @@ For web APIs, stream data on-demand rather than loading everything upfront.
 
 ### 4. C++ for Heavy Computation
 
-A* in C++ is 50x faster than JavaScript for graph traversal.
+Dijkstra in C++ is 50x faster than JavaScript for graph traversal.
 
 ---
 
